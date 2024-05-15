@@ -268,7 +268,7 @@ unsigned short GarbageCollectionFDP(RGID_T rgId, RUHID_T ruhId)
 				reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandEccWarning = REQ_OPT_NAND_ECC_WARNING_OFF;
 				reqPoolPtr->reqPool[reqSlotTag].reqOpt.rowAddrDependencyCheck = REQ_OPT_ROW_ADDR_DEPENDENCY_CHECK;
 				reqPoolPtr->reqPool[reqSlotTag].reqOpt.blockSpace = REQ_OPT_BLOCK_SPACE_MAIN;
-				reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry = victimDieNo; // TO BE CHECKED
+				reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry = rgId; // TO BE CHECKED
 				UpdateTempDataBufEntryInfoBlockingReq(reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry, reqSlotTag);
 				reqPoolPtr->reqPool[reqSlotTag].nandInfo.virtualSliceAddr = victimVSA;
 
@@ -286,7 +286,7 @@ unsigned short GarbageCollectionFDP(RGID_T rgId, RUHID_T ruhId)
 				reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandEccWarning = REQ_OPT_NAND_ECC_WARNING_OFF;
 				reqPoolPtr->reqPool[reqSlotTag].reqOpt.rowAddrDependencyCheck = REQ_OPT_ROW_ADDR_DEPENDENCY_CHECK;
 				reqPoolPtr->reqPool[reqSlotTag].reqOpt.blockSpace = REQ_OPT_BLOCK_SPACE_MAIN;
-				reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry = targetDieNo; // TO BE CHECKED
+				reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry = rgId; // TO BE CHECKED
 				UpdateTempDataBufEntryInfoBlockingReq(reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry, reqSlotTag);
 				reqPoolPtr->reqPool[reqSlotTag].nandInfo.virtualSliceAddr = targetVSA;
 

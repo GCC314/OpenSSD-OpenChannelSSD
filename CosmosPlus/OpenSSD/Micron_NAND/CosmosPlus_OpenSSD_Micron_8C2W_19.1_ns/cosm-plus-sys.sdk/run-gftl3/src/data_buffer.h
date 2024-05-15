@@ -48,9 +48,10 @@
 #define DATA_BUFFER_H_
 
 #include "ftl_config.h"
+#include "nvme/fdp/fdp.h"
 
 #define AVAILABLE_DATA_BUFFER_ENTRY_COUNT				(16 * USER_DIES)
-#define AVAILABLE_TEMPORARY_DATA_BUFFER_ENTRY_COUNT		(USER_DIES)
+#define AVAILABLE_TEMPORARY_DATA_BUFFER_ENTRY_COUNT		(USER_DIES + FDP_CONF_NRG)
 
 #define DATA_BUF_NONE	0xffff
 #define DATA_BUF_FAIL	0xffff
