@@ -78,6 +78,7 @@ typedef struct _ROW_ADDR_DEPENDENCY_TABLE {
 
 void InitDependencyTable();
 void ReqTransNvmeToSlice(unsigned int cmdSlotTag, unsigned int startLba, unsigned int nlb, unsigned int cmdCode);
+void ReqTransNvmeToSliceFDP(unsigned int cmdSlotTag, unsigned int startLba, unsigned int nlb, unsigned short rgId, unsigned short ruhId);
 void ReqTransSliceToLowLevel();
 void IssueNvmeDmaReq(unsigned int reqSlotTag);
 void CheckDoneNvmeDmaReq();
