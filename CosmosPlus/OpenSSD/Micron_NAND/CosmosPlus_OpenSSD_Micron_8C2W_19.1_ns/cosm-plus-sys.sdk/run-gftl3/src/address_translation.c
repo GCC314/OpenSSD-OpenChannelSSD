@@ -49,6 +49,8 @@
 #include "memory_map.h"
 #include "xil_printf.h"
 
+#include "nvme/fdp/fdp.h"
+
 P_LOGICAL_SLICE_MAP logicalSliceMapPtr;
 P_VIRTUAL_SLICE_MAP virtualSliceMapPtr;
 P_VIRTUAL_BLOCK_MAP virtualBlockMapPtr;
@@ -660,6 +662,179 @@ unsigned int AddrTransWrite(unsigned int logicalSliceAddr)
 		assert(!"[WARNING] Logical address is larger than maximum logical address served by SSD [WARNING]");
 }
 
+/**
+ * @brief Generate a new virtual slice address for a logical slice address, given rgId and ruhId
+ * 
+ * @param logicalSliceAddr Logical slice address
+ * @param rgId RGID
+ * @param ruhId RUHID
+ * 
+ * @return Virtual slice address
+ * 
+ * @note This function is used in FDP
+*/
+unsigned int AddrTransWriteFDP(unsigned int logicalSliceAddr, RGID_T rgId, RUHID_T ruhId)
+{
+	unsigned int virtualSliceAddr;
+
+	if(logicalSliceAddr < SLICES_PER_SSD)
+	{
+		InvalidateOldVsaFDP(logicalSliceAddr);
+
+		virtualSliceAddr = FindFreeVirtualSliceFDP(rgId, ruhId);
+
+		logicalSliceMapPtr->logicalSlice[logicalSliceAddr].virtualSliceAddr = virtualSliceAddr;
+		virtualSliceMapPtr->virtualSlice[virtualSliceAddr].logicalSliceAddr = logicalSliceAddr;
+
+		return virtualSliceAddr;
+	}
+	else
+		assert(!"[WARNING] Logical address is larger than maximum logical address served by SSD [WARNING]");
+}
+
+/**
+ * @brief Invalidate the old virtual slice address of a logical slice address
+ * 
+ * @param logicalSliceAddr Logical slice address
+ * 
+ * @note This function is used in FDP
+*/
+void InvalidateOldVsaFDP(unsigned int logicalSliceAddr)
+{
+	unsigned int virtualSliceAddr, dieNo, blockNo;
+	RUADDR_T ruAddr;
+	RGID_T rgId;
+	RUGID_T rugId;
+	RUHID_T ruhId;
+	SLICEID_T invalidSliceCnt;
+	unsigned short reqSlotTag;
+
+	virtualSliceAddr = logicalSliceMapPtr->logicalSlice[logicalSliceAddr].virtualSliceAddr;
+
+	if(virtualSliceAddr != VSA_NONE)
+	{
+		if(virtualSliceMapPtr->virtualSlice[virtualSliceAddr].logicalSliceAddr != logicalSliceAddr)
+			return;
+
+		dieNo = Vsa2VdieTranslation(virtualSliceAddr);
+		blockNo = Vsa2VblockTranslation(virtualSliceAddr);
+		ruAddr = blockRUInfoTable->blocks[dieNo][blockNo].ru_addr;
+		rgId = ruAddr & ((1 << endgrp->fdp.rgif) - 1);
+		rugId = ruAddr >> endgrp->fdp.rgif;
+		ruhId = endgrp->rgs[rgId].rus[rugId].ruhid;
+		if(ruhId == RUHID_NONE)
+			assert(!"[WARNING] There is no RUHID while invalidating [WARNING]");
+
+		logicalSliceMapPtr->logicalSlice[logicalSliceAddr].virtualSliceAddr = VSA_NONE;
+		invalidSliceCnt = ++endgrp->rgs[rgId].rus[rugId].invalid_slices;
+
+		popVictimRU(rgId, rugId);
+		putVictimRU(rgId, rugId, ruhId, invalidSliceCnt);
+	}
+}
+
+/**
+ * @brief Find a free virtual slice address given rgId and ruhId
+ * 
+ * @param rgId RGID
+ * @param ruhId RUHID
+ * 
+ * @return Virtual slice address
+ * 
+ * @note This function is used in FDP
+*/
+unsigned int FindFreeVirtualSliceFDP(RGID_T rgId, RUHID_T ruhId)
+{
+	unsigned int virtualSliceAddr;
+	unsigned short currentBlock;
+	unsigned int dieNo, blockNo, pageNo;
+	ReclaimGroup *rg = &endgrp->rgs[rgId];
+	RUHandle *ruh = &endgrp->fdp.ruhs[ruhId];
+	RUGID_T rugId = ruh->rus[rgId];
+	ReclaimUnit *ru = &rg->rus[rugId];
+
+	if(ru->current_slice == FDP_C_SLICE_PER_RU)
+	{
+		// Current RU is full, get a new free RU
+		rugId = getFreeRU(rgId, GET_FREE_RU_FOR_USE);
+		if(rugId == RU_NONE)
+		{
+			// No free RU in Current RG, do GC
+			rugId = GarbageCollectionFDP(rgId, ruhId);
+			ru = &rg->rus[rugId];
+			if(ru->current_slice == FDP_C_SLICE_PER_RU)
+			{
+				// GC merged into a full RU, but should produce a free RU
+				rugId = getFreeRU(rgId, GET_FREE_RU_FOR_USE);
+				if(rugId == RU_NONE)
+					assert(!"[WARNING] There is no free RU [WARNING]");
+			}
+		}
+		ruh->rus[rgId] = rugId;
+		ru = &rg->rus[rugId];
+		ru->ruhid = ruhId;
+	}
+
+	// calc dieNo/blockNo/pageNo by ru and current slice
+	currentBlock = ru->current_slice % FDP_CONF_RUSIZE_BLOCKS;
+	pageNo = ru->current_slice / FDP_CONF_RUSIZE_BLOCKS;
+	dieNo = ru->blo_addr[currentBlock] / USER_BLOCKS_PER_DIE;
+	blockNo = ru->blo_addr[currentBlock] % USER_BLOCKS_PER_DIE;
+
+	ru->current_slice++;
+	virtualSliceAddr = Vorg2VsaTranslation(dieNo, blockNo, pageNo);
+	return virtualSliceAddr;
+}
+
+/**
+ * @brief Erase a Reclaim Unit, given rgId and rugId
+ * 
+ * @param rgId RGID
+ * @param rugId RUGID
+ * 
+ * @note This function is used in FDP
+*/
+void EraseReclaimUnit(RGID_T rgId, RUGID_T rugId)
+{
+	ReclaimUnit *ru = &endgrp->rgs[rgId].rus[rugId];
+	unsigned int dieNo, blockNo, reqSlotTag;
+	BLOADDR_T bloAddr;
+	unsigned int pageNo, virtualSliceAddr;
+
+	for(int i = 0;i < FDP_CONF_RUSIZE_BLOCKS;i++)
+	{
+		bloAddr = ru->blo_addr[i];
+		dieNo = bloAddr / USER_BLOCKS_PER_DIE;
+		blockNo = bloAddr % USER_BLOCKS_PER_DIE;
+
+		// erase block
+		reqSlotTag = GetFromFreeReqQ();
+
+		reqPoolPtr->reqPool[reqSlotTag].reqType = REQ_TYPE_NAND;
+		reqPoolPtr->reqPool[reqSlotTag].reqCode = REQ_CODE_ERASE;
+		reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandAddr = REQ_OPT_NAND_ADDR_VSA;
+		reqPoolPtr->reqPool[reqSlotTag].reqOpt.dataBufFormat = REQ_OPT_DATA_BUF_NONE;
+		reqPoolPtr->reqPool[reqSlotTag].reqOpt.rowAddrDependencyCheck = REQ_OPT_ROW_ADDR_DEPENDENCY_CHECK;
+		reqPoolPtr->reqPool[reqSlotTag].reqOpt.blockSpace = REQ_OPT_BLOCK_SPACE_MAIN;
+		reqPoolPtr->reqPool[reqSlotTag].nandInfo.virtualSliceAddr = Vorg2VsaTranslation(dieNo, blockNo, 0);
+		reqPoolPtr->reqPool[reqSlotTag].nandInfo.programmedPageCnt = USER_PAGES_PER_BLOCK;
+
+		SelectLowLevelReqQ(reqSlotTag);
+
+		for(pageNo = 0; pageNo < USER_PAGES_PER_BLOCK; pageNo++)
+		{
+			virtualSliceAddr = Vorg2VsaTranslation(dieNo, blockNo, pageNo);
+			virtualSliceMapPtr->virtualSlice[virtualSliceAddr].logicalSliceAddr = LSA_NONE;
+		}
+	}
+
+	// reset metadata
+	ru->invalid_slices = 0;
+	ru->current_slice = 0;
+	ru->ruhid = RUHID_NONE;
+	// put back to free RU list
+	putFreeRU(rgId, rugId);
+}
 
 unsigned int FindFreeVirtualSlice()
 {

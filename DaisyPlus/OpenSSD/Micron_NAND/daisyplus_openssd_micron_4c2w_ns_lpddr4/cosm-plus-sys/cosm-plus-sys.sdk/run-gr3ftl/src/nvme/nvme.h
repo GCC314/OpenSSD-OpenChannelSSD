@@ -760,7 +760,7 @@ typedef struct _IO_READ_COMMAND_DW13
 				unsigned char SequentialRequest			:1;
 				unsigned char Incompressible			:1;
 			} DSM;
-			unsigned char reserved0[8];
+			unsigned char reserved0[1];
 			unsigned short DSPEC;
 		};
 	};

@@ -108,4 +108,8 @@
 
 #define DRAM_END_ADDR						0x3FFFFFFF
 
+// Below modified for FDP implementation
+
+#define FDP_MANAGEMENT_START_ADDR			RESERVED0_START_ADDR
+
 #endif /* MEMORY_MAP_H_ */

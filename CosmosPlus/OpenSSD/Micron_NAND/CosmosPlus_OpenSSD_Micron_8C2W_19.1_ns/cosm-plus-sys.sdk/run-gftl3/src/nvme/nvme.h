@@ -730,7 +730,9 @@ typedef struct _IO_READ_COMMAND_DW12
 		unsigned int dword;
 		struct {
 			unsigned short NLB;
-			unsigned short reserved0				:10;
+			unsigned short reserved0				:4;
+			unsigned short DTYPE					:4;
+			unsigned short reserved1				:2;
 			unsigned short PRINFO					:4;
 			unsigned short FUA						:1;
 			unsigned short LR						:1;
@@ -750,7 +752,8 @@ typedef struct _IO_READ_COMMAND_DW13
 				unsigned char SequentialRequest			:1;
 				unsigned char Incompressible			:1;
 			} DSM;
-			unsigned char reserved0[3];
+			unsigned char reserved0[1];
+			unsigned short DSPEC;
 		};
 	};
 } IO_READ_COMMAND_DW13;

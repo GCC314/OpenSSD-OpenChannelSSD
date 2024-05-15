@@ -65,6 +65,8 @@ void PutToGcVictimList(unsigned int dieNo, unsigned int blockNo, unsigned int in
 unsigned int GetFromGcVictimList(unsigned int dieNo);
 void SelectiveGetFromGcVictimList(unsigned int dieNo, unsigned int blockNo);
 
+unsigned short GarbageCollectionFDP(unsigned short rgId, unsigned short ruhId);
+
 extern P_GC_VICTIM_MAP gcVictimMapPtr;
 extern unsigned int gcTriggered;
 extern unsigned int copyCnt;
