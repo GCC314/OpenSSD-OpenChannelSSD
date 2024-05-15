@@ -49,6 +49,8 @@
 #include <assert.h>
 #include "memory_map.h"
 
+#include "nvme/fdp/fdp.h"
+
 P_GC_VICTIM_MAP gcVictimMapPtr;
 
 void InitGcVictimMap()
@@ -211,3 +213,101 @@ void SelectiveGetFromGcVictimList(unsigned int dieNo, unsigned int blockNo)
 	}
 }
 
+/**
+ * @brief Garbage Collection for FDP
+ * 
+ * @param rgId Reclaim Group ID
+ * @param ruhId RU Handle ID
+ * 
+ * @return RU ID after merging
+*/
+unsigned short GarbageCollectionFDP(RGID_T rgId, RUHID_T ruhId)
+{
+	RUGID_T targetRugId, victimRugId;
+	unsigned int targetVSA, targetLSA;
+	unsigned int victimVSA, victimLSA;
+	unsigned int reqSlotTag;
+	BLOADDR_T victimBloAddr;
+	unsigned int victimDieNo, victimBlockNo;
+	BLOADDR_T targetBloAddr;
+	unsigned int targetDieNo, targetBlockNo;
+
+	targetRugId = getFreeRU(rgId, GET_FREE_RU_FOR_GC);
+	victimRugId = getVictimRU(rgId, ruhId);
+
+	ReclaimUnit *targetRU = &endgrp->rgs[rgId].rus[targetRugId];
+	ReclaimUnit *victimRU = &endgrp->rgs[rgId].rus[victimRugId];
+
+	if(targetRU->invalid_slices != FDP_C_SLICE_PER_RU)
+	{
+		// Migrate valid data from victim RU to target RU
+		for(int i = 0;i < FDP_CONF_RUSIZE_BLOCKS;i++)
+		{
+			victimBloAddr = victimRU->blo_addr[i];
+			victimDieNo = victimBloAddr >> 11;
+			victimBlockNo = victimBloAddr & 0x7FF;
+			targetBloAddr = targetRU->blo_addr[i];
+			targetDieNo = targetBloAddr >> 11;
+			targetBlockNo = targetBloAddr & 0x7FF;
+			for(int j = 0;j < USER_PAGES_PER_BLOCK;j++)
+			{
+				victimVSA = Vorg2VsaTranslation(victimDieNo, victimBlockNo, j);
+				victimLSA = virtualSliceMapPtr->virtualSlice[victimVSA].logicalSliceAddr;
+				if(victimLSA == LSA_NONE || logicalSliceMapPtr->logicalSlice[victimLSA].virtualSliceAddr != victimVSA)
+					continue; // Invalid data
+				
+				//read
+				reqSlotTag = GetFromFreeReqQ();
+
+				reqPoolPtr->reqPool[reqSlotTag].reqType = REQ_TYPE_NAND;
+				reqPoolPtr->reqPool[reqSlotTag].reqCode = REQ_CODE_READ;
+				reqPoolPtr->reqPool[reqSlotTag].logicalSliceAddr = victimLSA;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.dataBufFormat = REQ_OPT_DATA_BUF_TEMP_ENTRY;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandAddr = REQ_OPT_NAND_ADDR_VSA;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandEcc = REQ_OPT_NAND_ECC_ON;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandEccWarning = REQ_OPT_NAND_ECC_WARNING_OFF;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.rowAddrDependencyCheck = REQ_OPT_ROW_ADDR_DEPENDENCY_CHECK;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.blockSpace = REQ_OPT_BLOCK_SPACE_MAIN;
+				reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry = victimDieNo; // TO BE CHECKED
+				UpdateTempDataBufEntryInfoBlockingReq(reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry, reqSlotTag);
+				reqPoolPtr->reqPool[reqSlotTag].nandInfo.virtualSliceAddr = victimVSA;
+
+				SelectLowLevelReqQ(reqSlotTag);
+
+				//write
+				reqSlotTag = GetFromFreeReqQ();
+
+				reqPoolPtr->reqPool[reqSlotTag].reqType = REQ_TYPE_NAND;
+				reqPoolPtr->reqPool[reqSlotTag].reqCode = REQ_CODE_WRITE;
+				reqPoolPtr->reqPool[reqSlotTag].logicalSliceAddr = targetLSA;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.dataBufFormat = REQ_OPT_DATA_BUF_TEMP_ENTRY;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandAddr = REQ_OPT_NAND_ADDR_VSA;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandEcc = REQ_OPT_NAND_ECC_ON;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.nandEccWarning = REQ_OPT_NAND_ECC_WARNING_OFF;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.rowAddrDependencyCheck = REQ_OPT_ROW_ADDR_DEPENDENCY_CHECK;
+				reqPoolPtr->reqPool[reqSlotTag].reqOpt.blockSpace = REQ_OPT_BLOCK_SPACE_MAIN;
+				reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry = targetDieNo; // TO BE CHECKED
+				UpdateTempDataBufEntryInfoBlockingReq(reqPoolPtr->reqPool[reqSlotTag].dataBufInfo.entry, reqSlotTag);
+				reqPoolPtr->reqPool[reqSlotTag].nandInfo.virtualSliceAddr = targetVSA;
+
+				logicalSliceMapPtr->logicalSlice[targetLSA].virtualSliceAddr = targetVSA;
+				virtualSliceMapPtr->virtualSlice[targetVSA].logicalSliceAddr = targetLSA;
+
+				SelectLowLevelReqQ(reqSlotTag);
+			}
+		}
+	}
+
+	EraseReclaimUnit(rgId, victimRugId);
+	return targetRugId;
+}
+
+/*
+
+@note
+Our current GC policy is a simple one.
+We just select the block with the most invalid slices as a victim block,
+and then copy valid pages to a free block.
+Finally, we erase the victim block to make a free block.
+
+*/

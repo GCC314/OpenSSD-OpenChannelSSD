@@ -110,4 +110,9 @@
 
 #define DUMMY_RD_WR_ADDR                    (DRAM_END_ADDR + 1 - 0x4000) // Reserved for NVMe IP.
 
+// Below modified for FDP implementation
+
+#define FDP_MANAGEMENT_START_ADDR			RESERVED0_START_ADDR
+
+
 #endif /* MEMORY_MAP_H_ */

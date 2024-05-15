@@ -54,6 +54,8 @@
 #include "memory_map.h"
 #include "ftl_config.h"
 
+#include "nvme/fdp/fdp.h"
+
 P_ROW_ADDR_DEPENDENCY_TABLE rowAddrDependencyTablePtr;
 
 void InitDependencyTable()
@@ -157,17 +159,120 @@ void ReqTransNvmeToSlice(unsigned int cmdSlotTag, unsigned int startLba, unsigne
 	PutToSliceReqQ(reqSlotTag);
 }
 
+/**
+ * @brief Transform NVMe request to slice request for FDP
+ * 
+ * @param 	rgId Reclaim Group ID
+ * 			ruhId Reclaim Unit Handler ID
+ * 
+ * @return 	void
+ * 
+ * @detail  We use req.nandInfo.ProgrammedPageCnt to passthrough rgId and ruhId.
+*/
+void ReqTransNvmeToSliceFDP(unsigned int cmdSlotTag, unsigned int startLba, unsigned int nlb, uint16_t rgId, uint16_t ruhId)
+{
+	unsigned int reqSlotTag, requestedNvmeBlock, tempNumOfNvmeBlock, transCounter, tempLsa, loop, nvmeBlockOffset, nvmeDmaStartIndex, reqCode;
+	PHINFO_PSTH *psth;
+
+	requestedNvmeBlock = nlb + 1;
+	transCounter = 0;
+	nvmeDmaStartIndex = 0;
+	tempLsa = startLba / NVME_BLOCKS_PER_SLICE;
+	loop = ((startLba % NVME_BLOCKS_PER_SLICE) + requestedNvmeBlock) / NVME_BLOCKS_PER_SLICE;
+
+	//first transform
+	nvmeBlockOffset = (startLba % NVME_BLOCKS_PER_SLICE);
+	if(loop)
+		tempNumOfNvmeBlock = NVME_BLOCKS_PER_SLICE - nvmeBlockOffset;
+	else
+		tempNumOfNvmeBlock = requestedNvmeBlock;
+
+	reqSlotTag = GetFromFreeReqQ();
+
+	reqPoolPtr->reqPool[reqSlotTag].reqType = REQ_TYPE_SLICE;
+	reqPoolPtr->reqPool[reqSlotTag].reqCode = reqCode;
+	reqPoolPtr->reqPool[reqSlotTag].nvmeCmdSlotTag = cmdSlotTag;
+	reqPoolPtr->reqPool[reqSlotTag].logicalSliceAddr = tempLsa;
+	reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.startIndex = nvmeDmaStartIndex;
+	reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.nvmeBlockOffset = nvmeBlockOffset;
+	reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.numOfNvmeBlock = tempNumOfNvmeBlock;
+	psth->data = (PHINFO_PSTH *)(&reqPoolPtr->reqPool[reqSlotTag].nandInfo.programmedPageCnt);
+	psth->rgid = rgId;
+	psth->ruhid = ruhId;
+
+	PutToSliceReqQ(reqSlotTag);
+
+	tempLsa++;
+	transCounter++;
+	nvmeDmaStartIndex += tempNumOfNvmeBlock;
+
+	//transform continue
+	while(transCounter < loop)
+	{
+		nvmeBlockOffset = 0;
+		tempNumOfNvmeBlock = NVME_BLOCKS_PER_SLICE;
+
+		reqSlotTag = GetFromFreeReqQ();
+
+		reqPoolPtr->reqPool[reqSlotTag].reqType = REQ_TYPE_SLICE;
+		reqPoolPtr->reqPool[reqSlotTag].reqCode = reqCode;
+		reqPoolPtr->reqPool[reqSlotTag].nvmeCmdSlotTag = cmdSlotTag;
+		reqPoolPtr->reqPool[reqSlotTag].logicalSliceAddr = tempLsa;
+		reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.startIndex = nvmeDmaStartIndex;
+		reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.nvmeBlockOffset = nvmeBlockOffset;
+		reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.numOfNvmeBlock = tempNumOfNvmeBlock;
+		psth->data = (PHINFO_PSTH *)(&reqPoolPtr->reqPool[reqSlotTag].nandInfo.programmedPageCnt);
+		psth->rgid = rgId;
+		psth->ruhid = ruhId;
+
+		PutToSliceReqQ(reqSlotTag);
+
+		tempLsa++;
+		transCounter++;
+		nvmeDmaStartIndex += tempNumOfNvmeBlock;
+	}
+
+	//last transform
+	nvmeBlockOffset = 0;
+	tempNumOfNvmeBlock = (startLba + requestedNvmeBlock) % NVME_BLOCKS_PER_SLICE;
+	if((tempNumOfNvmeBlock == 0) || (loop == 0))
+		return ;
+
+	reqSlotTag = GetFromFreeReqQ();
+
+	reqPoolPtr->reqPool[reqSlotTag].reqType = REQ_TYPE_SLICE;
+	reqPoolPtr->reqPool[reqSlotTag].reqCode = reqCode;
+	reqPoolPtr->reqPool[reqSlotTag].nvmeCmdSlotTag = cmdSlotTag;
+	reqPoolPtr->reqPool[reqSlotTag].logicalSliceAddr = tempLsa;
+	reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.startIndex = nvmeDmaStartIndex;
+	reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.nvmeBlockOffset = nvmeBlockOffset;
+	reqPoolPtr->reqPool[reqSlotTag].nvmeDmaInfo.numOfNvmeBlock = tempNumOfNvmeBlock;
+	psth->data = (PHINFO_PSTH *)(&reqPoolPtr->reqPool[reqSlotTag].nandInfo.programmedPageCnt);
+	psth->rgid = rgId;
+	psth->ruhid = ruhId;
+
+	PutToSliceReqQ(reqSlotTag);
+}
 
 
 void EvictDataBufEntry(unsigned int originReqSlotTag)
 {
 	unsigned int reqSlotTag, virtualSliceAddr, dataBufEntry;
+	unsigned int packedInfo, rgId, ruhId;
 
 	dataBufEntry = reqPoolPtr->reqPool[originReqSlotTag].dataBufInfo.entry;
 	if(dataBufMapPtr->dataBuf[dataBufEntry].dirty == DATA_BUF_DIRTY)
 	{
 		reqSlotTag = GetFromFreeReqQ();
-		virtualSliceAddr =  AddrTransWrite(dataBufMapPtr->dataBuf[dataBufEntry].logicalSliceAddr);
+		
+		if(endgrp->fdp.enabled) {
+			packedInfo = dataBufMapPtr->dataBuf[dataBufEntry].reserved0;
+			rgId = packedInfo & ((1 << endgrp->fdp.rgif) - 1);
+			ruhId = packedInfo >> (15 - endgrp->fdp.rgif);
+			virtualSliceAddr = AddrTransWriteFDP(dataBufMapPtr->dataBuf[dataBufEntry].logicalSliceAddr, rgId, ruhId);
+		} else {
+			virtualSliceAddr =  AddrTransWrite(dataBufMapPtr->dataBuf[dataBufEntry].logicalSliceAddr);
+		}
 
 		reqPoolPtr->reqPool[reqSlotTag].reqType = REQ_TYPE_NAND;
 		reqPoolPtr->reqPool[reqSlotTag].reqCode = REQ_CODE_WRITE;
@@ -222,12 +327,21 @@ void DataReadFromNand(unsigned int originReqSlotTag)
 void ReqTransSliceToLowLevel()
 {
 	unsigned int reqSlotTag, dataBufEntry;
+	PHINFO_PSTH *psth;
+	unsigned short rgId, ruhId;
 
 	while(sliceReqQ.headReq != REQ_SLOT_TAG_NONE)
 	{
 		reqSlotTag = GetFromSliceReqQ();
 		if(reqSlotTag == REQ_SLOT_TAG_FAIL)
 			return ;
+
+		if(endgrp->fdp.enabled && reqPoolPtr->reqPool[reqSlotTag].reqCode == REQ_CODE_WRITE)
+		{
+			psth = (PHINFO_PSTH *)(&reqPoolPtr->reqPool[reqSlotTag].nandInfo.programmedPageCnt);
+			rgId = psth->rgid;
+			ruhId = psth->ruhid;
+		} // Copy the Placement Hint Info now, because it may be overwritten soon
 
 		//allocate a data buffer entry for this request
 		dataBufEntry = CheckDataBufHit(reqSlotTag);
@@ -261,6 +375,14 @@ void ReqTransSliceToLowLevel()
 		{
 			dataBufMapPtr->dataBuf[dataBufEntry].dirty = DATA_BUF_DIRTY;
 			reqPoolPtr->reqPool[reqSlotTag].reqCode = REQ_CODE_RxDMA;
+
+			if(endgrp->fdp.enabled) {
+				unsigned int packedInfo = (ruhId << (15 - endgrp->fdp.rgif)) | rgId; // only 15 bits can be used
+				if(packedInfo >= (1 << 15)) {
+					assert(!"[WARNING] FDP: packedInfo is too large [WARNING]");
+				}
+				dataBufMapPtr->dataBuf[dataBufEntry].reserved0 = packedInfo;
+			}
 		}
 		else if(reqPoolPtr->reqPool[reqSlotTag].reqCode  == REQ_CODE_READ)
 			reqPoolPtr->reqPool[reqSlotTag].reqCode = REQ_CODE_TxDMA;

@@ -203,6 +203,10 @@ unsigned int GetFromFbList(unsigned int dieNo, unsigned int getFreeBlockOption);
 void UpdatePhyBlockMapForGrownBadBlock(unsigned int dieNo, unsigned int phyBlockNo);
 void UpdateBadBlockTableForGrownBadBlock(unsigned int tempBufAddr);
 
+unsigned int AddrTransWriteFDP(unsigned int logicalSliceAddr, unsigned short rgId, unsigned short ruhId);
+void InvalidateOldVsaFDP(unsigned int logicalSliceAddr);
+unsigned int FindFreeVirtualSliceFDP(unsigned short rgId, unsigned short ruhId);
+void EraseReclaimUnit(unsigned short rgId, unsigned short rugId);
 
 extern P_LOGICAL_SLICE_MAP logicalSliceMapPtr;
 extern P_VIRTUAL_SLICE_MAP virtualSliceMapPtr;

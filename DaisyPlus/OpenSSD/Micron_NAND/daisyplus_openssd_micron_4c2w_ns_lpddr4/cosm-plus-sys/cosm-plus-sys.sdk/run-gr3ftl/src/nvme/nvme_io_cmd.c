@@ -61,6 +61,8 @@
 #include "../ftl_config.h"
 #include "../request_transform.h"
 
+#include "fdp/fdp.h"
+
 void handle_nvme_io_read(unsigned int cmdSlotTag, NVME_IO_COMMAND *nvmeIOCmd)
 {
 	IO_READ_COMMAND_DW12 readInfo12;
@@ -91,14 +93,14 @@ void handle_nvme_io_read(unsigned int cmdSlotTag, NVME_IO_COMMAND *nvmeIOCmd)
 void handle_nvme_io_write(unsigned int cmdSlotTag, NVME_IO_COMMAND *nvmeIOCmd)
 {
 	IO_READ_COMMAND_DW12 writeInfo12;
-	//IO_READ_COMMAND_DW13 writeInfo13;
+	IO_READ_COMMAND_DW13 writeInfo13;
 	//IO_READ_COMMAND_DW15 writeInfo15;
 	unsigned int startLba[2];
 	unsigned int nlb;
 	unsigned int nsid = nvmeIOCmd->NSID;
 
 	writeInfo12.dword = nvmeIOCmd->dword[12];
-	//writeInfo13.dword = nvmeIOCmd->dword[13];
+	writeInfo13.dword = nvmeIOCmd->dword[13];
 	//writeInfo15.dword = nvmeIOCmd->dword[15];
 
 	//if(writeInfo12.FUA == 1)
@@ -113,7 +115,28 @@ void handle_nvme_io_write(unsigned int cmdSlotTag, NVME_IO_COMMAND *nvmeIOCmd)
 	ASSERT((nvmeIOCmd->PRP1[0] & 0xF) == 0 && (nvmeIOCmd->PRP2[0] & 0xF) == 0);
 	ASSERT(nvmeIOCmd->PRP1[1] < 0x10000 && nvmeIOCmd->PRP2[1] < 0x10000);
 
-	ReqTransNvmeToSlice(cmdSlotTag, startLba[0] + (storageCapacity_L / USER_CHANNELS) * (nsid - 1), nlb, IO_NVM_WRITE);
+	if(endgrp->fdp.enabled) {
+		// Using FDP
+		uint16_t dtype, dspec, rgId, ruhId, phId;
+		NamespaceFDP *nsFDP = &endgrp->ns[nsid - 1];
+
+		dtype = writeInfo12.DTYPE;
+		dspec = writeInfo13.DSPEC;
+		if(dtype == 0x0) {
+			// Placement hint not given, use default
+			dspec = 0;			
+		} else if(dtype != 0x2) {
+			xil_printf("Not Support DTYPE: 0x%X\r\n", dtype);
+			ASSERT(0);
+		}
+		rgId = dspec >> (16 - endgrp->fdp.rgif);
+		phId = dspec & ((1 << (16 - endgrp->fdp.rgif)) - 1);
+		assert(phId < nsFDP->fdp.nphs);
+		ruhId = nsFDP->fdp.phs[phId];
+		ReqTransNvmeToSliceFDP(cmdSlotTag, startLba[0] + (storageCapacity_L / USER_CHANNELS) * (nsid - 1), nlb, rgId, ruhId);
+	} else {
+		ReqTransNvmeToSlice(cmdSlotTag, startLba[0] + (storageCapacity_L / USER_CHANNELS) * (nsid - 1), nlb, IO_NVM_WRITE);
+	}
 }
 
 void handle_nvme_io_cmd(NVME_COMMAND *nvmeCmd)
