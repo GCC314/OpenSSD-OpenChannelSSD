@@ -55,6 +55,8 @@
 #include "nvme_identify.h"
 #include "nvme_admin_cmd.h"
 
+#include "fdp/fdp.h"
+
 extern NVME_CONTEXT g_nvmeTask;
 
 unsigned int get_num_of_queue(unsigned int dword11)
@@ -385,33 +387,60 @@ void handle_identify(NVME_ADMIN_COMMAND *nvmeAdminCmd, NVME_COMPLETION *nvmeCPL)
 
 void handle_get_log_page(NVME_ADMIN_COMMAND *nvmeAdminCmd, NVME_COMPLETION *nvmeCPL)
 {
-	//ADMIN_GET_LOG_PAGE_DW10 getLogPageInfo;
+	ADMIN_GET_LOG_PAGE_DW10 getLogPageInfo;
 
-	//unsigned int prp1[2];
-	//unsigned int prp2[2];
-	//unsigned int prpLen;
+	unsigned int prp[2];
+	unsigned int prpLen;
 
-	//getLogPageInfo.dword = nvmeAdminCmd->dword10;
+	getLogPageInfo.dword = nvmeAdminCmd->dword10;
 
-	//prp1[0] = nvmeAdminCmd->PRP1[0];
-	//prp1[1] = nvmeAdminCmd->PRP1[1];
-	//prpLen = 0x1000 - (prp1[0] & 0xFFF);
-
-	//prp2[0] = nvmeAdminCmd->PRP2[0];
-	//prp2[1] = nvmeAdminCmd->PRP2[1];
-
-	//xil_printf("ADMIN GET LOG PAGE\n");
+	xil_printf("ADMIN GET LOG PAGE\n");
 
 	//LID
 	//Mandatory//1-Error information, 2-SMART/Health information, 3-Firmware Slot information
 	//Optional//4-ChangedNamespaceList, 5-Command Effects Log
-	//xil_printf("LID: 0x%X, NUMD: 0x%X \r\n", getLogPageInfo.LID, getLogPageInfo.NUMD);
+	//
+	// FDP: 0x22-Statistics
+	xil_printf("LID: 0x%X, NUMD: 0x%X \r\n", getLogPageInfo.LID, getLogPageInfo.NUMD);
 
-	//xil_printf("PRP1[63:32] = 0x%X, PRP1[31:0] = 0x%X", prp1[1], prp1[0]);
-	//xil_printf("PRP2[63:32] = 0x%X, PRP2[31:0] = 0x%X", prp2[1], prp2[0]);
+	xil_printf("PRP1[63:32] = 0x%X, PRP1[31:0] = 0x%X", nvmeAdminCmd->PRP1[1], nvmeAdminCmd->PRP1[0]);
+	xil_printf("PRP2[63:32] = 0x%X, PRP2[31:0] = 0x%X", nvmeAdminCmd->PRP2[1], nvmeAdminCmd->PRP2[0]);
 
+	if(getLogPageInfo.LID != 0x22) {
+		nvmeCPL->dword[0] = 0;
+		nvmeCPL->specific = 0x9;//invalid log page
+		return;
+	}
+
+	if((nvmeAdminCmd->PRP1[0] & 0x3) != 0 || (nvmeAdminCmd->PRP2[0] & 0x3) != 0)
+		xil_printf("CI: %X, %X, %X, %X\r\n", nvmeAdminCmd->PRP1[1], nvmeAdminCmd->PRP1[0], nvmeAdminCmd->PRP2[1], nvmeAdminCmd->PRP2[0]);
+
+	ASSERT((nvmeAdminCmd->PRP1[0] & 0x3) == 0 && (nvmeAdminCmd->PRP2[0] & 0x3) == 0);
+
+	unsigned int pLogPageData = ADMIN_CMD_DRAM_DATA_BUFFER;
+	LogPageFDPStat((FDPLogStat*) pLogPageData);
+	
+	prp[0] = nvmeAdminCmd->PRP1[0];
+	prp[1] = nvmeAdminCmd->PRP1[1];
+
+	prpLen = 0x1000 - (prp[0] & 0xFFF);
+//	xil_printf("prpLen = %X, prp[1] = %X, prp[0] = %X\r\n",prpLen, prp[1], prp[0]);
+	set_direct_tx_dma(pLogPageData, prp[1], prp[0], prpLen);
+	if(prpLen != 0x1000)
+	{
+		pLogPageData = pLogPageData + prpLen;
+		prpLen = 0x1000 - prpLen;
+		prp[0] = nvmeAdminCmd->PRP2[0];
+		prp[1] = nvmeAdminCmd->PRP2[1];
+
+//		ASSERT((prp[1] & 0xFFF) == 0);
+//		xil_printf("prpLen = %X, prp[1] = %X, prp[0] = %X\r\n",prpLen, prp[1], prp[0]);
+		set_direct_tx_dma(pLogPageData, prp[1], prp[0], prpLen);
+	}
+
+	check_direct_tx_dma_done();
 	nvmeCPL->dword[0] = 0;
-	nvmeCPL->specific = 0x9;//invalid log page
+	nvmeCPL->specific = 0x0;
 }
 
 void handle_nvme_admin_cmd(NVME_COMMAND *nvmeCmd)

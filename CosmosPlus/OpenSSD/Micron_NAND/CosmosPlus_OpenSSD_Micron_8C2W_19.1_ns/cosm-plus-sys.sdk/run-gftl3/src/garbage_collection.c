@@ -231,6 +231,7 @@ unsigned short GarbageCollectionFDP(RGID_T rgId, RUHID_T ruhId)
 	unsigned int victimDieNo, victimBlockNo;
 	BLOADDR_T targetBloAddr;
 	unsigned int targetDieNo, targetBlockNo;
+	unsigned int migratePageCnt = 0;
 
 	targetRugId = getFreeRU(rgId, GET_FREE_RU_FOR_GC);
 	victimRugId = getVictimRU(rgId, ruhId);
@@ -244,11 +245,11 @@ unsigned short GarbageCollectionFDP(RGID_T rgId, RUHID_T ruhId)
 		for(int i = 0;i < FDP_CONF_RUSIZE_BLOCKS;i++)
 		{
 			victimBloAddr = victimRU->blo_addr[i];
-			victimDieNo = victimBloAddr >> 11;
-			victimBlockNo = victimBloAddr & 0x7FF;
+			victimDieNo = victimBloAddr >> LOG_BLOCKS_PER_DIE;
+			victimBlockNo = victimBloAddr & BLOCKS_PER_DIE_MASK;
 			targetBloAddr = targetRU->blo_addr[i];
-			targetDieNo = targetBloAddr >> 11;
-			targetBlockNo = targetBloAddr & 0x7FF;
+			targetDieNo = targetBloAddr >> LOG_BLOCKS_PER_DIE;
+			targetBlockNo = targetBloAddr & BLOCKS_PER_DIE_MASK;
 			for(int j = 0;j < USER_PAGES_PER_BLOCK;j++)
 			{
 				victimVSA = Vorg2VsaTranslation(victimDieNo, victimBlockNo, j);
@@ -256,6 +257,7 @@ unsigned short GarbageCollectionFDP(RGID_T rgId, RUHID_T ruhId)
 				if(victimLSA == LSA_NONE || logicalSliceMapPtr->logicalSlice[victimLSA].virtualSliceAddr != victimVSA)
 					continue; // Invalid data
 				
+				migratePageCnt++;
 				//read
 				reqSlotTag = GetFromFreeReqQ();
 
@@ -297,6 +299,9 @@ unsigned short GarbageCollectionFDP(RGID_T rgId, RUHID_T ruhId)
 			}
 		}
 	}
+
+	// statistics update
+	add64uto128u(&endgrp->fdp.mbmw, migratePageCnt * BYTES_PER_DATA_REGION_OF_PAGE);
 
 	EraseReclaimUnit(rgId, victimRugId);
 	return targetRugId;

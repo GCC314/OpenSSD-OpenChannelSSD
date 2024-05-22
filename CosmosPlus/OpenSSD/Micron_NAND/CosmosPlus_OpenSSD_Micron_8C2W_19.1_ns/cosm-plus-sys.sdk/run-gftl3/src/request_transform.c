@@ -160,14 +160,14 @@ void ReqTransNvmeToSlice(unsigned int cmdSlotTag, unsigned int startLba, unsigne
 }
 
 /**
- * @brief Transform NVMe request to slice request for FDP
+ * @brief Transform NVMe request to slice request for FDP Writes
  * 
  * @param 	rgId Reclaim Group ID
  * 			ruhId Reclaim Unit Handler ID
  * 
  * @return 	void
  * 
- * @detail  We use req.nandInfo.ProgrammedPageCnt to passthrough rgId and ruhId.
+ * @details  We use req.nandInfo.ProgrammedPageCnt to passthrough rgId and ruhId.
 */
 void ReqTransNvmeToSliceFDP(unsigned int cmdSlotTag, unsigned int startLba, unsigned int nlb, uint16_t rgId, uint16_t ruhId)
 {
@@ -252,6 +252,12 @@ void ReqTransNvmeToSliceFDP(unsigned int cmdSlotTag, unsigned int startLba, unsi
 	psth->ruhid = ruhId;
 
 	PutToSliceReqQ(reqSlotTag);
+
+	transCounter++;
+
+stat:
+	// update statistics
+	add64uto128u(&endgrp->fdp.mbmw, transCounter * BYTES_PER_DATA_REGION_OF_SLICE);
 }
 
 void EvictDataBufEntry(unsigned int originReqSlotTag)

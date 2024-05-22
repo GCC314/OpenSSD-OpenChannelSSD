@@ -828,6 +828,9 @@ void EraseReclaimUnit(RGID_T rgId, RUGID_T rugId)
 		}
 	}
 
+	// statistics update
+	add64uto128u(&endgrp->fdp.mbe, FDP_CONF_RUNS);
+
 	// reset metadata
 	ru->invalid_slices = 0;
 	ru->current_slice = 0;

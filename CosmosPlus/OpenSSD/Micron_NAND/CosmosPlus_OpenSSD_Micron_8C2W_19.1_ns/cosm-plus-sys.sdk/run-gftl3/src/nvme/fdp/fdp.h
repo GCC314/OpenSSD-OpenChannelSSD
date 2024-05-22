@@ -65,6 +65,13 @@ typedef struct Queue16 {
     uint16_t head, tail;
 } Queue16;
 
+typedef struct uint128_t {
+    uint64_t low;
+    uint64_t high;
+} uint128_t;
+
+void add64uto128u(uint128_t *a, uint64_t b);
+
 //---------------------------------------
 // FDP Configuration
 //
@@ -176,9 +183,9 @@ typedef struct EnduranceGroup {
         uint8_t  rgif;          // Reclaim Group Identifier Format
         uint64_t runs;          // Reclaim Unit Nominal Size, in bytes
 
-        uint64_t hbmw;          // Host Bytes with Metadata Written
-        uint64_t mbmw;          // Media Bytes with Metadata Written
-        uint64_t mbe;           // Media Bytes Erased
+        uint128_t hbmw;         // Host Bytes with Metadata Written
+        uint128_t mbmw;         // Media Bytes with Metadata Written
+        uint128_t mbe;          // Media Bytes Erased
 
         int enabled;
 
@@ -191,6 +198,17 @@ typedef struct EnduranceGroup {
 } EnduranceGroup;
 
 extern EnduranceGroup *endgrp;
+
+//---------------------------------------
+// FDP Log Page Format
+//---------------------------------------
+
+typedef struct FDPLogStat {
+    uint128_t hbmw;             // Host Bytes with Metadata Written
+    uint128_t mbmw;             // Media Bytes with Metadata Written
+    uint128_t mbe;              // Media Bytes Erased
+    uint128_t reserved;
+} FDPLogStat;
 
 //---------------------------------------
 // FDP Memory Map
@@ -211,6 +229,7 @@ extern EnduranceGroup *endgrp;
 //---------------------------------------
 
 void FDPInit();
+void LogPageFDPStat(FDPLogStat *stat);
 
 //---------------------------------------
 // Queue Functions

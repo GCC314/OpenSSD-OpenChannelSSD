@@ -65,9 +65,12 @@ void FDPConfigSetup()
     endgrp->fdp.nrg             = FDP_CONF_NRG;
     endgrp->fdp.rgif            = FDP_CONF_RGIF;
     endgrp->fdp.runs            = FDP_CONF_RUNS;
-    endgrp->fdp.hbmw            = 0;
-    endgrp->fdp.mbmw            = 0;
-    endgrp->fdp.mbe             = 0;
+    endgrp->fdp.hbmw.low        = 0;
+    endgrp->fdp.hbmw.high       = 0;
+    endgrp->fdp.mbmw.low        = 0;
+    endgrp->fdp.mbmw.high       = 0;
+    endgrp->fdp.mbe.low         = 0;
+    endgrp->fdp.mbe.high        = 0;
     endgrp->fdp.enabled         = FDP_CONF_ENABLED;
 
     endgrp->fdp.ruhs = (RUHandle *)FDP_RUHS_ADDR;
@@ -420,3 +423,34 @@ void popVictimRU(RGID_T rgId, RUGID_T rugId)
     ru->next_ru = RU_NONE;
 }
 
+/**
+ * @brief Add a 64-bit unsigned integer to a 128-bit unsigned integer
+ * 
+ * @param a 128-bit unsigned integer
+ * @param b 64-bit unsigned integer
+ * 
+ * @return void
+ * 
+ * @details
+ * This function is used to add a 64-bit unsigned integer to a 128-bit unsigned integer.
+ * If result reaches 0xFFFFFFFFFFFFFFFF, we shall not wrap, due to the specification.
+*/
+void add64uto128u(uint128_t *a, uint64_t b) {
+    uint64_t low = a->low;
+    a->low += b;
+    if(a->low < low) {
+        // overflow
+        if(a->high == 0xFFFFFFFFFFFFFFFF)
+            a->low = 0xFFFFFFFFFFFFFFFF;
+        else
+            a->high++;
+    }
+}
+
+void LogPageFDPStat(FDPLogStat *stat) {
+    stat->hbmw = endgrp->fdp.hbmw;
+    stat->mbmw = endgrp->fdp.mbmw;
+    stat->mbe = endgrp->fdp.mbe;
+    stat->reserved.low = 0;
+    stat->reserved.high = 0;
+}

@@ -115,6 +115,7 @@ void handle_nvme_io_write(unsigned int cmdSlotTag, NVME_IO_COMMAND *nvmeIOCmd)
 	ASSERT((nvmeIOCmd->PRP1[0] & 0xF) == 0 && (nvmeIOCmd->PRP2[0] & 0xF) == 0);
 	ASSERT(nvmeIOCmd->PRP1[1] < 0x10000 && nvmeIOCmd->PRP2[1] < 0x10000);
 
+
 	if(endgrp->fdp.enabled) {
 		// Using FDP
 		uint16_t dtype, dspec, rgId, ruhId, phId;
@@ -134,6 +135,8 @@ void handle_nvme_io_write(unsigned int cmdSlotTag, NVME_IO_COMMAND *nvmeIOCmd)
 		assert(phId < nsFDP->fdp.nphs);
 		ruhId = nsFDP->fdp.phs[phId];
 		ReqTransNvmeToSliceFDP(cmdSlotTag, startLba[0] + (storageCapacity_L / USER_CHANNELS) * (nsid - 1), nlb, rgId, ruhId);
+		// statistics update
+		add64uto128u(&endgrp->fdp.hbmw, nlb * BYTES_PER_NVME_BLOCK);
 	} else {
 		ReqTransNvmeToSlice(cmdSlotTag, startLba[0] + (storageCapacity_L / USER_CHANNELS) * (nsid - 1), nlb, IO_NVM_WRITE);
 	}
