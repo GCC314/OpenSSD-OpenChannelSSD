@@ -252,12 +252,6 @@ void ReqTransNvmeToSliceFDP(unsigned int cmdSlotTag, unsigned int startLba, unsi
 	psth->ruhid = ruhId;
 
 	PutToSliceReqQ(reqSlotTag);
-
-	transCounter++;
-
-stat:
-	// update statistics
-	add64uto128u(&endgrp->fdp.mbmw, transCounter * BYTES_PER_DATA_REGION_OF_SLICE);
 }
 
 void EvictDataBufEntry(unsigned int originReqSlotTag)
@@ -271,6 +265,9 @@ void EvictDataBufEntry(unsigned int originReqSlotTag)
 		reqSlotTag = GetFromFreeReqQ();
 
 		if(endgrp->fdp.enabled) {
+			// statistics update
+			add64uto128u(&endgrp->fdp.mbmw, BYTES_PER_DATA_REGION_OF_SLICE);
+
 			packedInfo = dataBufMapPtr->dataBuf[dataBufEntry].reserved0;
 			rgId = packedInfo & ((1 << endgrp->fdp.rgif) - 1);
 			ruhId = packedInfo >> (15 - endgrp->fdp.rgif);
